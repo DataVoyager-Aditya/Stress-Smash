@@ -1,0 +1,102 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom color variables */
+:root {
+  --color-primary: #8b5cf6;
+  --color-secondary: #06b6d4;
+  --color-accent: #f59e0b;
+}
+
+/* Smooth transitions */
+* {
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Focus styles for accessibility */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* Reduced motion for accessibility */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Safe area support for mobile devices */
+.safe-area-top {
+  padding-top: env(safe-area-inset-top);
+}
+
+/* Galaxy S24 specific optimizations */
+@media screen and (max-width: 390px) {
+  /* Ensure text doesn't get too small on very small screens */
+  .text-xs {
+    font-size: 0.75rem;
+  }
+  
+  /* Optimize button spacing for touch targets */
+  button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  
+  /* Prevent horizontal overflow */
+  body {
+    overflow-x: hidden;
+  }
+}
+
+/* Specific fixes for Galaxy S24 (360px width) */
+@media screen and (max-width: 360px) {
+  /* Reduce padding on very small screens */
+  .p-4 {
+    padding: 0.75rem;
+  }
+  
+  .px-4 {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+  }
+  
+  /* Ensure navigation doesn't overflow */
+  nav {
+    min-height: 56px;
+  }
+  
+  /* Optimize font sizes for readability */
+  .text-base {
+    font-size: 0.875rem;
+  }
+  
+  .text-lg {
+    font-size: 1rem;
+  }
+}
