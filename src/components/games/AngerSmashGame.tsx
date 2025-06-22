@@ -1,63 +1,117 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { RotateCcw, Zap, Volume2, VolumeX, Play, Pause, Share2, Users, Settings, X } from 'lucide-react';
+import { RotateCcw, Zap, Volume2, VolumeX, Play, Pause, Share2, Users, Settings, X, Target, Trophy, Flame } from 'lucide-react';
 import { useSoundEffects } from '../../hooks/useSoundEffects';
 
 interface SmashObject {
   id: string;
   x: number;
   y: number;
-  type: 'box' | 'plate' | 'balloon' | 'ice' | 'powerup';
+  type: 'box' | 'plate' | 'balloon' | 'ice' | 'powerup' | 'stress_ball' | 'anger_cloud';
   color: string;
   size: number;
   points: number;
+  health: number;
+  maxHealth: number;
+  angerRelief: number;
 }
 
 interface AngerSmashGameProps {
   onComplete: (score: number) => void;
 }
 
-interface AudioSettings {
-  sfxVolume: number;
-  lastSfxTime: number;
-}
-
-interface GameSettings {
-  showParticles: boolean;
-  autoShare: boolean;
+interface Particle {
+  id: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  color: string;
+  life: number;
 }
 
 export const AngerSmashGame: React.FC<AngerSmashGameProps> = ({ onComplete }) => {
   const [objects, setObjects] = useState<SmashObject[]>([]);
+  const [particles, setParticles] = useState<Particle[]>([]);
   const [score, setScore] = useState(0);
-  const [timeLeft, setTimeLeft] = useState(90);
+  const [timeLeft, setTimeLeft] = useState(120);
   const [gameActive, setGameActive] = useState(true);
   const [combo, setCombo] = useState(0);
-  const [showSettings, setShowSettings] = useState(false);
-  const [showShareModal, setShowShareModal] = useState(false);
+  const [maxCombo, setMaxCombo] = useState(0);
+  const [angerLevel, setAngerLevel] = useState(9);
+  const [frustrationMeter, setFrustrationMeter] = useState(8);
+  const [objectsSmashed, setObjectsSmashed] = useState(0);
+  const [powerMode, setPowerMode] = useState(false);
   const [gameStarted, setGameStarted] = useState(false);
+  const [achievements, setAchievements] = useState<string[]>([]);
   
-  // Audio state (removed background music)
-  const [audioSettings, setAudioSettings] = useState<AudioSettings>({
-    sfxVolume: 60,
-    lastSfxTime: 0
-  });
-  
-  // Game settings
-  const [gameSettings, setGameSettings] = useState<GameSettings>({
-    showParticles: true,
-    autoShare: false
-  });
-
   const audioContextRef = useRef<AudioContext | null>(null);
   const sounds = useSoundEffects();
 
   const objectTypes = [
-    { type: 'box' as const, icon: '📦', color: 'from-amber-400 to-orange-500', points: 10 },
-    { type: 'plate' as const, icon: '🍽️', color: 'from-blue-400 to-cyan-500', points: 15 },
-    { type: 'balloon' as const, icon: '🎈', color: 'from-red-400 to-pink-500', points: 20 },
-    { type: 'ice' as const, icon: '🧊', color: 'from-cyan-300 to-blue-400', points: 25 },
-    { type: 'powerup' as const, icon: '⚡', color: 'from-yellow-400 to-orange-400', points: 50 }
+    { 
+      type: 'box' as const, 
+      emoji: '📦', 
+      color: 'from-amber-400 to-orange-500', 
+      points: 15, 
+      health: 1,
+      angerRelief: 0.2,
+      description: 'Basic stress relief'
+    },
+    { 
+      type: 'plate' as const, 
+      emoji: '🍽️', 
+      color: 'from-blue-400 to-cyan-500', 
+      points: 25, 
+      health: 1,
+      angerRelief: 0.3,
+      description: 'Satisfying crash'
+    },
+    { 
+      type: 'balloon' as const, 
+      emoji: '🎈', 
+      color: 'from-red-400 to-pink-500', 
+      points: 10, 
+      health: 1,
+      angerRelief: 0.1,
+      description: 'Quick pop relief'
+    },
+    { 
+      type: 'ice' as const, 
+      emoji: '🧊', 
+      color: 'from-cyan-300 to-blue-400', 
+      points: 40, 
+      health: 2,
+      angerRelief: 0.5,
+      description: 'Cool down anger'
+    },
+    { 
+      type: 'stress_ball' as const, 
+      emoji: '⚽', 
+      color: 'from-green-400 to-emerald-500', 
+      points: 60, 
+      health: 3,
+      angerRelief: 0.8,
+      description: 'Major stress relief'
+    },
+    { 
+      type: 'anger_cloud' as const, 
+      emoji: '☁️', 
+      color: 'from-gray-400 to-slate-500', 
+      points: 100, 
+      health: 5,
+      angerRelief: 1.5,
+      description: 'Dispel negative thoughts'
+    },
+    { 
+      type: 'powerup' as const, 
+      emoji: '⚡', 
+      color: 'from-yellow-400 to-orange-400', 
+      points: 80, 
+      health: 1,
+      angerRelief: 0.3,
+      description: 'Activate power mode'
+    }
   ];
 
   // Initialize audio context
@@ -69,11 +123,8 @@ export const AngerSmashGame: React.FC<AngerSmashGameProps> = ({ onComplete }) =>
     }
   }, []);
 
-  const playSound = (frequency: number, duration: number, type: 'sine' | 'square' | 'sawtooth' | 'triangle' = 'sine') => {
+  const playSmashSound = (type: string, intensity: number = 1) => {
     if (!audioContextRef.current) return;
-
-    const now = Date.now();
-    if (now - audioSettings.lastSfxTime < 100) return; // Reduced delay for better responsiveness
 
     try {
       const oscillator = audioContextRef.current.createOscillator();
@@ -82,17 +133,36 @@ export const AngerSmashGame: React.FC<AngerSmashGameProps> = ({ onComplete }) =>
       oscillator.connect(gainNode);
       gainNode.connect(audioContextRef.current.destination);
       
-      oscillator.frequency.value = frequency;
-      oscillator.type = type;
+      // Different sounds for different objects
+      switch (type) {
+        case 'box':
+          oscillator.frequency.value = 150 * intensity;
+          oscillator.type = 'square';
+          break;
+        case 'plate':
+        case 'ice':
+          oscillator.frequency.value = 800 * intensity;
+          oscillator.type = 'sawtooth';
+          break;
+        case 'stress_ball':
+          oscillator.frequency.value = 300 * intensity;
+          oscillator.type = 'triangle';
+          break;
+        case 'anger_cloud':
+          oscillator.frequency.value = 200 * intensity;
+          oscillator.type = 'sine';
+          break;
+        default:
+          oscillator.frequency.value = 400 * intensity;
+          oscillator.type = 'triangle';
+      }
       
-      const volume = audioSettings.sfxVolume / 100;
+      const volume = Math.min(0.3 * intensity, 0.6);
       gainNode.gain.setValueAtTime(volume, audioContextRef.current.currentTime);
-      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContextRef.current.currentTime + duration);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContextRef.current.currentTime + 0.3);
       
       oscillator.start(audioContextRef.current.currentTime);
-      oscillator.stop(audioContextRef.current.currentTime + duration);
-      
-      setAudioSettings(prev => ({ ...prev, lastSfxTime: now }));
+      oscillator.stop(audioContextRef.current.currentTime + 0.3);
     } catch (error) {
       console.log('Sound effect failed');
     }
@@ -102,29 +172,68 @@ export const AngerSmashGame: React.FC<AngerSmashGameProps> = ({ onComplete }) =>
     const objType = objectTypes[Math.floor(Math.random() * objectTypes.length)];
     return {
       id: Math.random().toString(36).substr(2, 9),
-      x: Math.random() * (window.innerWidth - 100),
-      y: Math.random() * (window.innerHeight - 200) + 100,
+      x: Math.random() * (window.innerWidth - 150) + 75,
+      y: Math.random() * (window.innerHeight - 300) + 150,
       type: objType.type,
       color: objType.color,
-      size: Math.random() * 30 + 50,
-      points: objType.points
+      size: Math.random() * 30 + 60,
+      points: objType.points,
+      health: objType.health,
+      maxHealth: objType.health,
+      angerRelief: objType.angerRelief
     };
   };
+
+  const createParticles = (x: number, y: number, color: string, count: number = 12) => {
+    const newParticles: Particle[] = [];
+    for (let i = 0; i < count; i++) {
+      newParticles.push({
+        id: Math.random().toString(36).substr(2, 9),
+        x,
+        y,
+        vx: (Math.random() - 0.5) * 10,
+        vy: (Math.random() - 0.5) * 10,
+        color,
+        life: 1
+      });
+    }
+    setParticles(prev => [...prev, ...newParticles]);
+  };
+
+  // Animate particles
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setParticles(prev => prev
+        .map(particle => ({
+          ...particle,
+          x: particle.x + particle.vx,
+          y: particle.y + particle.vy,
+          vx: particle.vx * 0.98,
+          vy: particle.vy * 0.98 + 0.2,
+          life: particle.life - 0.02
+        }))
+        .filter(particle => particle.life > 0)
+      );
+    }, 16);
+
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     if (!gameActive || !gameStarted) return;
 
     const interval = setInterval(() => {
       setObjects(prev => {
-        if (prev.length < 8) {
+        const maxObjects = powerMode ? 12 : 8;
+        if (prev.length < maxObjects) {
           return [...prev, createObject()];
         }
         return prev;
       });
-    }, 1500);
+    }, powerMode ? 800 : 1500);
 
     return () => clearInterval(interval);
-  }, [gameActive, gameStarted]);
+  }, [gameActive, gameStarted, powerMode]);
 
   useEffect(() => {
     if (!gameActive || !gameStarted) return;
@@ -133,10 +242,7 @@ export const AngerSmashGame: React.FC<AngerSmashGameProps> = ({ onComplete }) =>
       setTimeLeft(prev => {
         if (prev <= 1) {
           setGameActive(false);
-          if (gameSettings.autoShare && score > 100) {
-            setShowShareModal(true);
-          }
-          onComplete(score);
+          completeGame();
           return 0;
         }
         return prev - 1;
@@ -144,136 +250,253 @@ export const AngerSmashGame: React.FC<AngerSmashGameProps> = ({ onComplete }) =>
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [gameActive, gameStarted, score, onComplete, gameSettings.autoShare]);
+  }, [gameActive, gameStarted]);
+
+  // Power mode timer
+  useEffect(() => {
+    if (powerMode) {
+      const timer = setTimeout(() => {
+        setPowerMode(false);
+      }, 10000);
+      return () => clearTimeout(timer);
+    }
+  }, [powerMode]);
 
   const smashObject = (objectId: string) => {
     const object = objects.find(obj => obj.id === objectId);
     if (!object) return;
 
-    setObjects(prev => prev.filter(obj => obj.id !== objectId));
-    setScore(prev => prev + object.points + (combo * 2));
-    setCombo(prev => prev + 1);
+    const newHealth = object.health - 1;
     
-    // Play appropriate sound effect
-    switch (object.type) {
-      case 'box':
-        playSound(150, 0.3, 'square'); // Ball impact (60% volume)
-        break;
-      case 'plate':
-      case 'ice':
-        playSound(800, 0.2, 'sawtooth'); // Object destruction (70% volume)
-        break;
-      case 'powerup':
-        playSound(1200, 0.15, 'sine'); // Power-up collection (50% volume)
-        break;
-      default:
-        playSound(400, 0.25, 'triangle');
+    if (newHealth <= 0) {
+      // Object destroyed
+      setObjects(prev => prev.filter(obj => obj.id !== objectId));
+      
+      const comboMultiplier = Math.floor(combo / 5) + 1;
+      const powerMultiplier = powerMode ? 2 : 1;
+      const points = object.points * comboMultiplier * powerMultiplier;
+      
+      setScore(prev => prev + points);
+      setObjectsSmashed(prev => prev + 1);
+      setCombo(prev => {
+        const newCombo = prev + 1;
+        setMaxCombo(max => Math.max(max, newCombo));
+        return newCombo;
+      });
+      
+      // Reduce anger and frustration
+      setAngerLevel(prev => Math.max(0, prev - object.angerRelief));
+      setFrustrationMeter(prev => Math.max(0, prev - object.angerRelief * 0.5));
+      
+      // Create destruction particles
+      createParticles(object.x, object.y, object.color.includes('red') ? '#ef4444' : '#3b82f6', 15);
+      
+      // Play appropriate sound
+      playSmashSound(object.type, comboMultiplier);
+      
+      // Special effects for different objects
+      if (object.type === 'powerup') {
+        setPowerMode(true);
+        sounds.achievement();
+      } else if (object.type === 'anger_cloud') {
+        sounds.zen();
+        // Extra particle effect for anger clouds
+        createParticles(object.x, object.y, '#6b7280', 25);
+      } else {
+        sounds.smash();
+      }
+      
+      // Check for achievements
+      checkAchievements();
+      
+    } else {
+      // Object damaged but not destroyed
+      setObjects(prev => prev.map(obj => 
+        obj.id === objectId ? { ...obj, health: newHealth } : obj
+      ));
+      
+      // Create smaller particle effect
+      createParticles(object.x, object.y, '#fbbf24', 6);
+      playSmashSound(object.type, 0.5);
     }
     
-    setTimeout(() => setCombo(0), 2000);
+    // Reset combo after delay
+    setTimeout(() => setCombo(0), 3000);
+  };
+
+  const checkAchievements = () => {
+    const newAchievements = [];
+    
+    if (combo >= 20 && !achievements.includes('Combo Master')) {
+      newAchievements.push('Combo Master');
+    }
+    if (angerLevel <= 2 && !achievements.includes('Zen Achieved')) {
+      newAchievements.push('Zen Achieved');
+    }
+    if (objectsSmashed >= 50 && !achievements.includes('Destruction Expert')) {
+      newAchievements.push('Destruction Expert');
+    }
+    if (powerMode && !achievements.includes('Power User')) {
+      newAchievements.push('Power User');
+    }
+    
+    if (newAchievements.length > 0) {
+      setAchievements(prev => [...prev, ...newAchievements]);
+      sounds.achievement();
+    }
+  };
+
+  const completeGame = () => {
+    const angerReduction = ((9 - angerLevel) / 9) * 40;
+    const frustrationReduction = ((8 - frustrationMeter) / 8) * 30;
+    const comboBonus = (maxCombo / 100) * 20;
+    const achievementBonus = achievements.length * 5;
+    const timeBonus = timeLeft > 0 ? 5 : 0;
+    
+    const finalScore = Math.round(angerReduction + frustrationReduction + comboBonus + achievementBonus + timeBonus);
+    onComplete(finalScore);
   };
 
   const startGame = () => {
     setGameStarted(true);
     setGameActive(true);
-    setScore(0);
-    setCombo(0);
-    setTimeLeft(90);
-    setObjects([]);
+    sounds.success();
   };
 
   const reset = () => {
     setObjects([]);
+    setParticles([]);
     setScore(0);
-    setTimeLeft(90);
+    setTimeLeft(120);
     setGameActive(true);
     setCombo(0);
+    setMaxCombo(0);
+    setAngerLevel(9);
+    setFrustrationMeter(8);
+    setObjectsSmashed(0);
+    setPowerMode(false);
     setGameStarted(false);
-  };
-
-  const shareScore = () => {
-    const shareText = `I just smashed my stress away and scored ${score} points in StressSmash! 💥 Taking care of my mental health one smash at a time. #StressRelief #MentalHealth`;
-    
-    if (navigator.share) {
-      navigator.share({
-        title: 'StressSmash Score',
-        text: shareText,
-        url: window.location.origin
-      }).catch(console.error);
-    } else {
-      navigator.clipboard.writeText(shareText).then(() => {
-        alert('Score copied to clipboard!');
-      }).catch(console.error);
-    }
-    setShowShareModal(false);
+    setAchievements([]);
   };
 
   const getObjectIcon = (type: string) => {
     const obj = objectTypes.find(o => o.type === type);
-    return obj?.icon || '📦';
+    return obj?.emoji || '📦';
+  };
+
+  const getHealthBarColor = (health: number, maxHealth: number) => {
+    const percentage = health / maxHealth;
+    if (percentage > 0.6) return 'bg-green-500';
+    if (percentage > 0.3) return 'bg-yellow-500';
+    return 'bg-red-500';
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-red-100 via-orange-50 to-yellow-100 text-gray-800 relative overflow-hidden">
-      {/* Header with enhanced controls */}
-      <div className="absolute top-6 left-6 right-6 z-10">
-        <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-4 shadow-lg">
-          <div className="flex justify-between items-center">
-            <div className="flex items-center space-x-4">
-              <div className="text-center">
-                <div className="text-2xl font-bold">{score}</div>
-                <div className="text-sm opacity-75">Score</div>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold">{timeLeft}s</div>
-                <div className="text-sm opacity-75">Time Left</div>
-              </div>
-              {combo > 0 && (
-                <div className="text-center">
-                  <div className="text-2xl font-bold text-orange-600">{combo}x</div>
-                  <div className="text-sm text-orange-600">Combo</div>
-                </div>
-              )}
-            </div>
-            
-            <div className="flex items-center space-x-2">
-              {/* Settings */}
-              <motion.button
-                className="bg-blue-500 text-white p-3 rounded-full shadow-lg"
-                onClick={() => setShowSettings(true)}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                title="Game Settings"
-              >
-                <Settings className="w-5 h-5" />
-              </motion.button>
+      {/* Power Mode Overlay */}
+      {powerMode && (
+        <div className="absolute inset-0 bg-yellow-400/20 pointer-events-none z-10 animate-pulse" />
+      )}
 
-              {/* Reset */}
-              <motion.button
-                className="bg-gray-500 text-white p-3 rounded-full shadow-lg"
-                onClick={reset}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                title="Reset Game"
-              >
-                <RotateCcw className="w-5 h-5" />
-              </motion.button>
+      {/* Enhanced HUD */}
+      <div className="absolute top-4 left-4 right-4 z-20">
+        <div className="bg-white/90 backdrop-blur-sm rounded-2xl p-4 shadow-lg">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-center mb-3">
+            <div>
+              <div className="text-xl font-bold text-orange-600">{score}</div>
+              <div className="text-xs text-gray-600">Score</div>
+            </div>
+            <div>
+              <div className="text-xl font-bold text-red-600">{objectsSmashed}</div>
+              <div className="text-xs text-gray-600">Smashed</div>
+            </div>
+            <div>
+              <div className="text-xl font-bold text-purple-600">{combo}x</div>
+              <div className="text-xs text-gray-600">Combo</div>
+            </div>
+            <div>
+              <div className="text-xl font-bold text-blue-600">{Math.round(angerLevel)}/10</div>
+              <div className="text-xs text-gray-600">Anger</div>
+            </div>
+            <div>
+              <div className="text-xl font-bold text-gray-800">{Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}</div>
+              <div className="text-xs text-gray-600">Time</div>
             </div>
           </div>
+          
+          {/* Anger Level Bar */}
+          <div className="mb-2">
+            <div className="flex justify-between text-xs text-gray-600 mb-1">
+              <span>Anger Level</span>
+              <span>{Math.round(angerLevel)}/10</span>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-3">
+              <motion.div
+                className={`h-3 rounded-full transition-colors duration-500 ${
+                  angerLevel > 7 ? 'bg-red-500' :
+                  angerLevel > 4 ? 'bg-yellow-500' : 'bg-green-500'
+                }`}
+                initial={{ width: '90%' }}
+                animate={{ width: `${(angerLevel / 10) * 100}%` }}
+              />
+            </div>
+          </div>
+
+          {/* Frustration Meter */}
+          <div>
+            <div className="flex justify-between text-xs text-gray-600 mb-1">
+              <span>Frustration</span>
+              <span>{Math.round(frustrationMeter)}/10</span>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-2">
+              <motion.div
+                className="bg-orange-500 h-2 rounded-full"
+                initial={{ width: '80%' }}
+                animate={{ width: `${(frustrationMeter / 10) * 100}%` }}
+              />
+            </div>
+          </div>
+
+          {/* Power Mode Indicator */}
+          {powerMode && (
+            <div className="mt-2 text-center">
+              <motion.div
+                className="bg-yellow-500 text-white px-3 py-1 rounded-full text-sm font-bold inline-flex items-center"
+                animate={{ scale: [1, 1.1, 1] }}
+                transition={{ duration: 0.5, repeat: Infinity }}
+              >
+                <Zap className="w-4 h-4 mr-1" />
+                POWER MODE ACTIVE!
+              </motion.div>
+            </div>
+          )}
         </div>
       </div>
 
       {/* Game Start Screen */}
       {!gameStarted && (
-        <div className="absolute inset-0 flex items-center justify-center">
+        <div className="absolute inset-0 flex items-center justify-center z-30">
           <motion.div
-            className="text-center"
+            className="text-center bg-white/90 rounded-2xl p-8 max-w-md mx-4"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
           >
             <div className="text-6xl mb-4">💥</div>
-            <div className="text-2xl font-bold mb-2">Anger Smash Game</div>
-            <div className="text-lg mb-6 opacity-75">Release your frustration safely!</div>
+            <div className="text-2xl font-bold mb-4">Advanced Anger Release Therapy</div>
+            <div className="text-lg mb-6 text-gray-600">
+              Scientifically designed to help you release anger and frustration safely
+            </div>
+            
+            <div className="grid grid-cols-2 gap-3 mb-6 text-sm">
+              {objectTypes.slice(0, 4).map((type, index) => (
+                <div key={index} className="bg-gray-50 p-3 rounded-lg">
+                  <div className="text-2xl mb-1">{type.emoji}</div>
+                  <div className="font-semibold text-gray-800">{type.type.replace('_', ' ')}</div>
+                  <div className="text-xs text-gray-600">{type.description}</div>
+                </div>
+              ))}
+            </div>
+            
             <motion.button
               className="bg-gradient-to-r from-red-500 to-orange-500 text-white px-8 py-4 rounded-full text-lg font-semibold shadow-lg"
               onClick={startGame}
@@ -281,23 +504,8 @@ export const AngerSmashGame: React.FC<AngerSmashGameProps> = ({ onComplete }) =>
               whileTap={{ scale: 0.95 }}
             >
               <Play className="w-6 h-6 mr-2 inline" />
-              Start Smashing
+              Start Anger Release Session
             </motion.button>
-          </motion.div>
-        </div>
-      )}
-
-      {/* Instructions */}
-      {gameStarted && objects.length === 0 && gameActive && (
-        <div className="absolute inset-0 flex items-center justify-center">
-          <motion.div
-            className="text-center opacity-75"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-          >
-            <div className="text-6xl mb-4">💥</div>
-            <div className="text-xl font-semibold mb-2">Get Ready to Smash!</div>
-            <div className="text-lg">Objects will appear soon. Tap them to release stress!</div>
           </motion.div>
         </div>
       )}
@@ -307,7 +515,9 @@ export const AngerSmashGame: React.FC<AngerSmashGameProps> = ({ onComplete }) =>
         {objects.map((object) => (
           <motion.div
             key={object.id}
-            className={`absolute cursor-pointer bg-gradient-to-br ${object.color} rounded-lg shadow-lg flex items-center justify-center text-4xl select-none`}
+            className={`absolute cursor-pointer bg-gradient-to-br ${object.color} rounded-lg shadow-lg flex flex-col items-center justify-center text-4xl select-none ${
+              powerMode ? 'ring-4 ring-yellow-400' : ''
+            }`}
             style={{
               left: object.x - object.size / 2,
               top: object.y - object.size / 2,
@@ -315,7 +525,11 @@ export const AngerSmashGame: React.FC<AngerSmashGameProps> = ({ onComplete }) =>
               height: object.size,
             }}
             initial={{ scale: 0, rotate: 0 }}
-            animate={{ scale: 1, rotate: Math.random() * 20 - 10 }}
+            animate={{ 
+              scale: 1, 
+              rotate: Math.random() * 20 - 10,
+              y: [0, -5, 0]
+            }}
             exit={{ 
               scale: 0, 
               rotate: 360,
@@ -325,10 +539,28 @@ export const AngerSmashGame: React.FC<AngerSmashGameProps> = ({ onComplete }) =>
             whileHover={{ scale: 1.1, rotate: 0 }}
             whileTap={{ scale: 0.8 }}
             onClick={() => smashObject(object.id)}
+            transition={{
+              y: { duration: 2, repeat: Infinity, ease: "easeInOut" }
+            }}
           >
             {getObjectIcon(object.type)}
             
-            {/* Enhanced smash effect */}
+            {/* Health bar for multi-hit objects */}
+            {object.maxHealth > 1 && (
+              <div className="absolute -bottom-2 left-1 right-1 bg-gray-200 rounded-full h-1">
+                <div 
+                  className={`h-1 rounded-full transition-all ${getHealthBarColor(object.health, object.maxHealth)}`}
+                  style={{ width: `${(object.health / object.maxHealth) * 100}%` }}
+                />
+              </div>
+            )}
+            
+            {/* Points indicator */}
+            <div className="absolute -top-2 -right-2 bg-white text-gray-800 text-xs font-bold px-1 py-0.5 rounded-full">
+              +{object.points}
+            </div>
+
+            {/* Smash effect */}
             <motion.div
               className="absolute inset-0 bg-yellow-400 rounded-lg opacity-0"
               whileTap={{ 
@@ -338,34 +570,62 @@ export const AngerSmashGame: React.FC<AngerSmashGameProps> = ({ onComplete }) =>
               }}
               transition={{ duration: 0.3 }}
             />
-            
-            {/* Particle effects */}
-            {gameSettings.showParticles && (
-              <motion.div
-                className="absolute inset-0 pointer-events-none"
-                whileTap={{
-                  background: [
-                    'radial-gradient(circle, rgba(255,255,0,0) 0%, rgba(255,255,0,0) 100%)',
-                    'radial-gradient(circle, rgba(255,255,0,0.8) 0%, rgba(255,165,0,0.6) 50%, rgba(255,0,0,0) 100%)',
-                    'radial-gradient(circle, rgba(255,255,0,0) 0%, rgba(255,255,0,0) 100%)'
-                  ]
-                }}
-                transition={{ duration: 0.4 }}
-              />
-            )}
-
-            {/* Points indicator */}
-            <div className="absolute -top-2 -right-2 bg-white text-gray-800 text-xs font-bold px-1 py-0.5 rounded-full">
-              +{object.points}
-            </div>
           </motion.div>
         ))}
       </AnimatePresence>
 
+      {/* Particles */}
+      <AnimatePresence>
+        {particles.map((particle) => (
+          <motion.div
+            key={particle.id}
+            className="absolute w-2 h-2 rounded-full pointer-events-none"
+            style={{
+              left: particle.x,
+              top: particle.y,
+              backgroundColor: particle.color,
+              opacity: particle.life
+            }}
+            exit={{ opacity: 0 }}
+          />
+        ))}
+      </AnimatePresence>
+
+      {/* Achievements Display */}
+      <AnimatePresence>
+        {achievements.length > 0 && (
+          <motion.div
+            className="absolute top-32 right-4 bg-yellow-400 text-gray-800 p-3 rounded-lg shadow-lg z-20"
+            initial={{ x: 100, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: 100, opacity: 0 }}
+          >
+            <Trophy className="w-5 h-5 inline mr-2" />
+            <span className="font-semibold">Achievement Unlocked!</span>
+            <div className="text-sm mt-1">
+              {achievements[achievements.length - 1]}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Controls */}
+      <div className="absolute bottom-4 right-4 flex space-x-2">
+        <motion.button
+          className="bg-gray-500 text-white p-3 rounded-full shadow-lg"
+          onClick={reset}
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          title="Reset Game"
+        >
+          <RotateCcw className="w-5 h-5" />
+        </motion.button>
+      </div>
+
       {/* Game Over Screen */}
       {!gameActive && gameStarted && (
         <motion.div
-          className="absolute inset-0 bg-black/50 flex items-center justify-center z-20"
+          className="absolute inset-0 bg-black/50 flex items-center justify-center z-40"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
         >
@@ -375,12 +635,35 @@ export const AngerSmashGame: React.FC<AngerSmashGameProps> = ({ onComplete }) =>
             animate={{ scale: 1, opacity: 1 }}
             transition={{ delay: 0.2 }}
           >
-            <div className="text-6xl mb-4">🎯</div>
-            <h3 className="text-2xl font-bold mb-2">Frustration Released!</h3>
-            <p className="mb-4">Final Score: <span className="font-bold text-2xl text-orange-500">{score}</span></p>
-            <p className="text-sm opacity-75 mb-6">
-              Physical release activities help process anger in a healthy way
+            <Flame className="w-16 h-16 text-orange-500 mx-auto mb-4" />
+            <h3 className="text-2xl font-bold mb-4">Anger Released!</h3>
+            
+            <div className="grid grid-cols-2 gap-4 mb-6 text-sm">
+              <div className="bg-red-50 p-3 rounded-lg">
+                <div className="font-semibold text-red-800">Anger Reduction</div>
+                <div className="text-2xl font-bold text-red-600">
+                  {Math.round(((9 - angerLevel) / 9) * 100)}%
+                </div>
+              </div>
+              <div className="bg-orange-50 p-3 rounded-lg">
+                <div className="font-semibold text-orange-800">Objects Smashed</div>
+                <div className="text-2xl font-bold text-orange-600">{objectsSmashed}</div>
+              </div>
+              <div className="bg-purple-50 p-3 rounded-lg">
+                <div className="font-semibold text-purple-800">Max Combo</div>
+                <div className="text-2xl font-bold text-purple-600">{maxCombo}x</div>
+              </div>
+              <div className="bg-yellow-50 p-3 rounded-lg">
+                <div className="font-semibold text-yellow-800">Achievements</div>
+                <div className="text-2xl font-bold text-yellow-600">{achievements.length}</div>
+              </div>
+            </div>
+
+            <p className="text-sm text-gray-600 mb-6">
+              Physical release activities help process anger in a healthy, controlled way. 
+              You've successfully channeled your frustration into positive action!
             </p>
+            
             <div className="flex space-x-3">
               <motion.button
                 className="flex-1 bg-orange-500 hover:bg-orange-600 text-white px-6 py-3 rounded-full font-medium"
@@ -388,145 +671,12 @@ export const AngerSmashGame: React.FC<AngerSmashGameProps> = ({ onComplete }) =>
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
               >
-                Play Again
-              </motion.button>
-              <motion.button
-                className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-full font-medium"
-                onClick={() => setShowShareModal(true)}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-              >
-                <Share2 className="w-4 h-4 mr-2 inline" />
-                Share
+                Release More Anger
               </motion.button>
             </div>
           </motion.div>
         </motion.div>
       )}
-
-      {/* Settings Modal */}
-      <AnimatePresence>
-        {showSettings && (
-          <motion.div
-            className="fixed inset-0 bg-black/50 flex items-center justify-center z-30 p-4"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-          >
-            <motion.div
-              className="bg-white text-gray-800 rounded-2xl p-6 max-w-md w-full"
-              initial={{ scale: 0.8 }}
-              animate={{ scale: 1 }}
-              exit={{ scale: 0.8 }}
-            >
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-lg font-semibold">Game Settings</h3>
-                <button
-                  onClick={() => setShowSettings(false)}
-                  className="opacity-50 hover:opacity-100"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              <div className="space-y-6">
-                {/* Audio Settings */}
-                <div>
-                  <h4 className="font-medium mb-3">Audio Settings</h4>
-                  <div className="space-y-3">
-                    <div>
-                      <label className="block text-sm mb-1">Sound Effects Volume: {audioSettings.sfxVolume}%</label>
-                      <input
-                        type="range"
-                        min="0"
-                        max="100"
-                        value={audioSettings.sfxVolume}
-                        onChange={(e) => setAudioSettings(prev => ({ ...prev, sfxVolume: parseInt(e.target.value) }))}
-                        className="w-full"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Visual Settings */}
-                <div>
-                  <h4 className="font-medium mb-3">Visual Settings</h4>
-                  <div className="space-y-3">
-                    <label className="flex items-center justify-between">
-                      <span>Show Particle Effects</span>
-                      <input
-                        type="checkbox"
-                        checked={gameSettings.showParticles}
-                        onChange={(e) => setGameSettings(prev => ({ ...prev, showParticles: e.target.checked }))}
-                        className="rounded"
-                      />
-                    </label>
-                    <label className="flex items-center justify-between">
-                      <span>Auto-share High Scores</span>
-                      <input
-                        type="checkbox"
-                        checked={gameSettings.autoShare}
-                        onChange={(e) => setGameSettings(prev => ({ ...prev, autoShare: e.target.checked }))}
-                        className="rounded"
-                      />
-                    </label>
-                  </div>
-                </div>
-              </div>
-
-              <button
-                onClick={() => setShowSettings(false)}
-                className="w-full mt-6 bg-blue-500 hover:bg-blue-600 text-white py-3 rounded-lg font-medium"
-              >
-                Done
-              </button>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Share Modal */}
-      <AnimatePresence>
-        {showShareModal && (
-          <motion.div
-            className="fixed inset-0 bg-black/50 flex items-center justify-center z-30 p-4"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-          >
-            <motion.div
-              className="bg-white text-gray-800 rounded-2xl p-6 max-w-md w-full"
-              initial={{ scale: 0.8 }}
-              animate={{ scale: 1 }}
-              exit={{ scale: 0.8 }}
-            >
-              <div className="text-center">
-                <div className="text-4xl mb-4">🎉</div>
-                <h3 className="text-lg font-semibold mb-2">Share Your Achievement!</h3>
-                <p className="mb-4">You scored {score} points! Share your stress-busting success.</p>
-                
-                <div className="flex space-x-3">
-                  <motion.button
-                    onClick={shareScore}
-                    className="flex-1 bg-blue-500 hover:bg-blue-600 text-white py-3 rounded-lg font-medium"
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                  >
-                    <Share2 className="w-4 h-4 mr-2 inline" />
-                    Share Score
-                  </motion.button>
-                  <button
-                    onClick={() => setShowShareModal(false)}
-                    className="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-800 py-3 rounded-lg font-medium"
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 };
